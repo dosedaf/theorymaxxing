@@ -66,7 +66,7 @@ func main() {
 	cfg.Consumer.Offsets.Initial = sarama.OffsetOldest
 	cfg.Consumer.Return.Errors = true
 
-	cg, err := sarama.NewConsumerGroup([]string{"localhost:9092"}, "kafk", cfg)
+	cg, err := sarama.NewConsumerGroup([]string{"localhost:9092"}, "kafk2", cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -79,6 +79,7 @@ func main() {
 		if err := cg.Consume(ctx, []string{"events"}, &consumer); err != nil {
 			log.Println("consume:", err)
 		}
+
 		if ctx.Err() != nil {
 			return
 		}
