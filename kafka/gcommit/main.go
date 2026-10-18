@@ -36,7 +36,7 @@ func main() {
 		styleNum = 1
 	case strings.HasPrefix("uncommitted", *style):
 		styleNum = 2
-	case strings.HasPrefix("mark", *style):
+	case strings.HasPrefix("marks", *style):
 		styleNum = 3
 	case strings.HasPrefix("kadm", *style):
 		styleNum = 4
@@ -48,6 +48,7 @@ func main() {
 
 	if styleNum == 4 {
 		consumeKadm(seeds)
+		return
 	}
 
 	opts := []kgo.Opt{
@@ -129,7 +130,7 @@ func consume(cl *kgo.Client, style int) {
 				die("error committing records: %v", err) 
 			}
 
-			log.Printf("commited records: %v", rs)
+			log.Printf("records commited: %d", len(rs))
 		case 2:
 			var seen int
 
@@ -143,17 +144,25 @@ func consume(cl *kgo.Client, style int) {
 			log.Printf("commited uncommitted: %v", seen)
 		case 3:
 			marks := make(map[string]map[int32]kgo.EpochOffset)
-			fetches.EachPartition(func(p kgo.FetchTopicPartition) {
-				if len(p) == 0 {
+
+		fetches.EachPartition(func(p kgo.FetchTopicPartition) {
+				if len(p.Records) == 0 {
 					return
 				}
 
-				last := p.Records[-1]
+				if marks[p.Topic] == nil {
+					marks[p.Topic] = make(map[int32]kgo.EpochOffset)
+				}
+
+				last := p.Records[len(p.Records)-1]
 				marks[p.Topic][p.Partition] = kgo.EpochOffset{
 					Epoch: last.LeaderEpoch,
 					Offset: last.Offset + 1,
 				}
+
+				fmt.Printf("marked %s p%d through offset %d\n", p.Topic, p.Partition, last.Offset)
 			})
+
 			if err := cl.CommitMarkedOffsets(context.Background()); err != nil {
 				die("error committing marked offsets: %v", err) 
 			}
@@ -163,4 +172,32 @@ func consume(cl *kgo.Client, style int) {
 }
 
 func consumeKadm(seeds kgo.Opt) {
+	adm, err := kgo.NewClient(seeds)
+	if err != nil {
+		die("error creating client: %v", err)
+	}
+
+	admCl := kadm.NewClient(adm)
+
+	os, err := admCl.FetchOffsetsForTopics(context.Background(), *group, *topic)
+	if err != nil {
+		die("fetchign offsets for topic %v: %v", *topic, err)
+	}
+
+	cl, err := kgo.NewClient(seeds, kgo.ConsumePartitions(os.KOffsets()))
+	if err != nil {
+		die("unable to create client: %v", err)
+	}
+	defer cl.Close()
+
+	fmt.Println("tes")
+	fs := cl.PollRecords(context.Background(), 1)
+	fmt.Println("tes")
+
+	if err := admCl.CommitAllOffsets(context.Background(), *group, kadm.OffsetsFromFetches(fs)); err != nil {
+		die("unable to commit offsets: %v", err)
+	}
+
+	r := fs.Records()[0]
+	fmt.Printf("committed record on partition %d at offset %d\n", r.Partition, r.Offset)
 }
