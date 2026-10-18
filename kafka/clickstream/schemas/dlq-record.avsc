@@ -1,0 +1,50 @@
+{
+  "type": "record",
+  "name": "DlqRecord",
+  "namespace": "dev.theorymaxxing.clickstream",
+  "doc": "REFERENCE contract for ingest-service quarantine rows on events.dlq -- the generator does not produce this. Message key: the original event key when the record is decodable (semantic_violation), otherwise null. The generator's malformed taxonomy maps onto 'reason' as: garbage_bytes, bad_magic, corrupt_body, semantic_violation.",
+  "fields": [
+    {
+      "name": "source_topic",
+      "type": "string"
+    },
+    {
+      "name": "source_partition",
+      "type": "int"
+    },
+    {
+      "name": "source_offset",
+      "type": "long",
+      "doc": "Lets you jump straight to the offending record in the raw topic."
+    },
+    {
+      "name": "event_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Only decodable for semantic_violation rows; null for wire-level corruption."
+    },
+    {
+      "name": "reason",
+      "type": {
+        "type": "enum",
+        "name": "Reason",
+        "symbols": ["garbage_bytes", "bad_magic", "corrupt_body", "semantic_violation", "unknown_schema", "other"]
+      }
+    },
+    {
+      "name": "detail",
+      "type": "string",
+      "doc": "Human-readable failure detail (decode error text, violated rule, ...)."
+    },
+    {
+      "name": "error_ts",
+      "type": "long",
+      "doc": "Processing time of the rejection, millis since epoch UTC."
+    },
+    {
+      "name": "payload",
+      "type": "bytes",
+      "doc": "Original raw value bytes, for replay and forensics."
+    }
+  ]
+}

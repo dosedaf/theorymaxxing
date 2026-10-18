@@ -1,6 +1,6 @@
-module produ
+module producer
 
-go 1.26.0
+go 1.26.8
 
 require github.com/IBM/sarama v1.61.1
 

@@ -1,0 +1,72 @@
+{
+  "type": "record",
+  "name": "ClickstreamEvent",
+  "namespace": "dev.theorymaxxing.clickstream",
+  "doc": "Raw clickstream event emitted to events.raw by the event-generator. Record key: user_id (default) or session_id (--key-by). Kafka record timestamp == event_ts. v2 adds optional device and referrer with defaults, which is what makes this BACKWARD compatible with v1. Run the generator with --schema-version 2 to flip subjects live.",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique event identifier. This is the dedupe key."
+    },
+    {
+      "name": "event_type",
+      "type": {
+        "type": "enum",
+        "name": "EventType",
+        "symbols": ["pageview", "click", "purchase"]
+      },
+      "doc": "Funnel stage."
+    },
+    {
+      "name": "event_ts",
+      "type": "long",
+      "doc": "Event time, millis since epoch UTC. May be out-of-order or late by design -- never assume it is sorted."
+    },
+    {
+      "name": "user_id",
+      "type": "string",
+      "doc": "Virtual user. Same universe as ref.users when both faucets run with the same seed."
+    },
+    {
+      "name": "session_id",
+      "type": "string",
+      "doc": "Session grouping id (s-XXXXXXXX)."
+    },
+    {
+      "name": "page",
+      "type": "string",
+      "doc": "App path where the event happened."
+    },
+    {
+      "name": "product_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Set for click and purchase events; null for pageviews."
+    },
+    {
+      "name": "qty",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Units purchased; purchases only."
+    },
+    {
+      "name": "revenue",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "unit_price * qty for purchases, in USD."
+    },
+    {
+      "name": "device",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "v2: mobile | desktop | tablet."
+    },
+    {
+      "name": "referrer",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "v2: traffic source for the session (direct, google.com, ...)."
+    }
+  ]
+}

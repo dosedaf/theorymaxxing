@@ -1,0 +1,201 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
+	"math/rand/v2"
+	"os/signal"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+const (
+	topic = "not-dlq"
+	group = "dlq-group"
+	dlqTopic = "dlq"
+	maxRetryCount = 1
+)
+
+type kafka struct {
+	producer *kgo.Client
+	consumer *kgo.Client
+}
+
+type message struct {
+	Topic       string    `json:"topic"`
+	Key         []byte    `json:"key"`
+	Value       []byte    `json:"value"`
+	Timestamp   time.Time `json:"timestamp"`
+	Offset      int64     `json:"offset"`
+	Partition   int32     `json:"partition"`
+	LeaderEpoch int32     `json:"leader_epoch"`
+}
+
+func (k *kafka) connectConsumer(ctx context.Context) error {
+	var err error
+	k.consumer, err = kgo.NewClient(
+		kgo.SeedBrokers("localhost:9092"),
+		kgo.ConsumerGroup(group),
+		kgo.ConsumeTopics(topic),
+		)
+	if err != nil {
+		return err
+	}
+
+	if err = k.consumer.Ping(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (k *kafka) connectProducer(ctx context.Context) error {
+	var err error
+	k.producer, err = kgo.NewClient(
+		kgo.SeedBrokers("localhost:9092"),
+		kgo.AllowAutoTopicCreation(),
+		)
+	if err != nil {
+		return err
+	}
+
+	if err = k.producer.Ping(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (k *kafka) run(ctx context.Context, wg *sync.WaitGroup) {
+	defer  wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			fetches := k.consumer.PollFetches(ctx)
+			if fetches.IsClientClosed() {
+				return
+			}
+			if fetches.Empty() {
+				continue
+			}
+			fetches.EachError(func(_ string, _ int32, err error) {
+				panic(err)
+			})
+			fetches.EachPartition(func(p kgo.FetchTopicPartition) {
+				for _, rec := range p.Records {
+					if err := k.process(rec); err != nil {
+						log.Printf("failed processing msg: %v", err.Error())
+
+						if err := k.retry(rec); err != nil {
+							log.Printf("failed retrying: %v", err.Error())
+
+							msg := &message{
+								Topic:       rec.Topic,
+								Key:         rec.Key,
+								Value:       rec.Value,
+								Timestamp:   rec.Timestamp,
+								Offset:      rec.Offset,
+								Partition:   rec.Partition,
+								LeaderEpoch: rec.LeaderEpoch,
+							}
+
+							failed, _ := json.Marshal(msg)
+
+							k.producer.Produce(ctx, &kgo.Record{
+								Topic:     dlqTopic,
+								Key:       rec.Key,
+								Value:     failed,
+								Timestamp: time.Now(),
+								Headers: []kgo.RecordHeader{
+									{Key: "status", Value: []byte("review")},
+									{Key: "error", Value: []byte(err.Error())},
+								},
+							}, nil)
+
+							log.Printf("sent to dlq")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func (k *kafka) process(r *kgo.Record) error {
+	time.Sleep(1 * time.Second)
+	msg := &message{
+		Topic:       r.Topic,
+		Key:         r.Key,
+		Value:       r.Value,
+		Timestamp:   r.Timestamp,
+		Offset:      r.Offset,
+		Partition:   r.Partition,
+		LeaderEpoch: r.LeaderEpoch,
+	}
+	if rand.IntN(100)%2 != 0 {
+		return errors.New("failed to process record")
+	}
+
+	log.Printf("message processed: %v", msg)
+	return nil
+}
+
+
+func (k *kafka) retry(rec *kgo.Record) error {
+	var err error
+
+	for i := 1; i <= maxRetryCount; i++ {
+		log.Printf("retry processing msg: %d", i)
+		if err = k.process(rec); err != nil {
+			time.Sleep(time.Duration(i*2) * time.Second)
+		} else {
+			log.Printf("msg retried succesfully")
+			return nil
+		}
+	}
+
+	return err
+}
+
+func (k *kafka) close() {
+	k.producer.Close()
+	k.consumer.Close()
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	k := &kafka{}
+	var wg sync.WaitGroup
+	if err := k.connectProducer(ctx); err != nil {
+		panic(err)
+	}
+
+	if err := k.connectConsumer(ctx); err != nil {
+		panic(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		k.producer.Produce(ctx, &kgo.Record{
+			Topic: topic,
+			Key: []byte("key" + strconv.Itoa(i)),
+			Value: []byte("value" + strconv.Itoa(i)),
+			Timestamp: time.Now(),
+		}, nil)
+	}
+	wg.Add(1)
+	go k.run(ctx, &wg)
+
+	<-ctx.Done()
+	k.close()
+	wg.Wait()
+}

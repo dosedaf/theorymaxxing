@@ -1,0 +1,47 @@
+{
+  "type": "record",
+  "name": "RefProduct",
+  "namespace": "dev.theorymaxxing.clickstream",
+  "doc": "Reference product carried on the compacted ref.products topic. Message key = product_id. Prices mutate and products get deleted (tombstoned) continuously by refseed, simulating a CDC feed.",
+  "fields": [
+    {
+      "name": "product_id",
+      "type": "string"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "category",
+      "type": {
+        "type": "enum",
+        "name": "Category",
+        "symbols": ["electronics", "apparel", "home", "beauty", "sports", "toys", "grocery", "books"]
+      }
+    },
+    {
+      "name": "price",
+      "type": "double",
+      "doc": "List price in USD. Mutates over time; note that event revenue is computed by the generator from the price at purchase time."
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "doc": "Always USD."
+    },
+    {
+      "name": "stock",
+      "type": "int"
+    },
+    {
+      "name": "is_active",
+      "type": "boolean"
+    },
+    {
+      "name": "updated_at",
+      "type": "long",
+      "doc": "Processing-time millis of the last mutation."
+    }
+  ]
+}

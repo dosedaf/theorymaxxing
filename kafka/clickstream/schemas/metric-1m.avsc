@@ -1,0 +1,50 @@
+{
+  "type": "record",
+  "name": "Metric1m",
+  "namespace": "dev.theorymaxxing.clickstream",
+  "doc": "REFERENCE contract for the aggregator's output on metrics.1m -- the generator does not produce this. Suggested message key: '<dim_type>:<dim_key>:<window_start>' so that republished corrections for the same window/dimension land on the same partition and compact or upsert deterministically.",
+  "fields": [
+    {
+      "name": "window_start",
+      "type": "long",
+      "doc": "Event-time window start, millis since epoch UTC, aligned to the minute."
+    },
+    {
+      "name": "window_end",
+      "type": "long",
+      "doc": "Event-time window end (exclusive), millis since epoch UTC."
+    },
+    {
+      "name": "metric",
+      "type": {
+        "type": "enum",
+        "name": "Metric",
+        "symbols": ["events", "active_users", "revenue"]
+      }
+    },
+    {
+      "name": "dim_type",
+      "type": {
+        "type": "enum",
+        "name": "DimType",
+        "symbols": ["total", "product", "country"]
+      }
+    },
+    {
+      "name": "dim_key",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "null for total; product_id or country code otherwise."
+    },
+    {
+      "name": "value",
+      "type": "double",
+      "doc": "Aggregated value. Events and active_users are integral; revenue is USD."
+    },
+    {
+      "name": "updated_at",
+      "type": "long",
+      "doc": "Processing-time millis of the last write. Late events rewrite the same key with a higher updated_at, giving you idempotent last-write-wins upserts."
+    }
+  ]
+}

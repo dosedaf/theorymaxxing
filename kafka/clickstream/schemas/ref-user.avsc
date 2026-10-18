@@ -1,0 +1,55 @@
+{
+  "type": "record",
+  "name": "RefUser",
+  "namespace": "dev.theorymaxxing.clickstream",
+  "doc": "Reference user profile carried on the compacted ref.users topic. Message key = user_id. Updates and tombstones are issued continuously by refseed, simulating a CDC feed.",
+  "fields": [
+    {
+      "name": "user_id",
+      "type": "string"
+    },
+    {
+      "name": "email",
+      "type": "string"
+    },
+    {
+      "name": "full_name",
+      "type": "string"
+    },
+    {
+      "name": "country",
+      "type": "string",
+      "doc": "ISO-ish country code, e.g. US, DE, JP."
+    },
+    {
+      "name": "city",
+      "type": "string"
+    },
+    {
+      "name": "signup_ts",
+      "type": "long",
+      "doc": "Millis since epoch UTC; stable for the lifetime of the user."
+    },
+    {
+      "name": "plan",
+      "type": {
+        "type": "enum",
+        "name": "Plan",
+        "symbols": ["free", "pro", "enterprise"]
+      }
+    },
+    {
+      "name": "loyalty_points",
+      "type": "int"
+    },
+    {
+      "name": "is_active",
+      "type": "boolean"
+    },
+    {
+      "name": "updated_at",
+      "type": "long",
+      "doc": "Processing-time millis of the last mutation. Useful for spotting stale enrichment tables."
+    }
+  ]
+}
