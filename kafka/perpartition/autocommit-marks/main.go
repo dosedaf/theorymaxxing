@@ -1,36 +1,37 @@
 package main
 
 import (
-	"flag"
-	"time"
 	"context"
-	"strings"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 var rs []*kgo.Record
 
-var(
-	seen = 0
-	nrecs = 0
+var (
+	seen    = 0
+	nrecs   = 0
 	brokers = flag.String("b", "", "brokers")
-	group = flag.String("g", "", "group")
-	topic = flag.String("t", "", "topic")
+	group   = flag.String("g", "", "group")
+	topic   = flag.String("t", "", "topic")
 )
 
 type splitConsume struct {
+	wg        sync.WaitGroup
 	consumers map[string]map[int32]pconsumer
 }
 
 type pconsumer struct {
-	cl *kgo.Client
+	cl   *kgo.Client
+	name string
 	quit chan struct{}
 	recs chan []*kgo.Record
-
 }
 
 func main() {
@@ -87,27 +88,42 @@ func (s *splitConsume) assigned(_ context.Context, cl *kgo.Client, assigned map[
 		}
 		for _, p := range ps {
 			pc := pconsumer{
+				name: fmt.Sprintf("worker %d", p),
 				quit: make(chan struct{}),
 				recs: make(chan []*kgo.Record, 10),
-				cl: cl,
+				cl:   cl,
 			}
 
 			s.consumers[topic][p] = pc
+			s.wg.Add(1)
 			go pc.consume(topic, p)
 		}
 	}
 }
 
 func (s *splitConsume) revoked(_ context.Context, cl *kgo.Client, revoked map[string][]int32) {
+	fmt.Println("blocked")
+	s.wg.Wait()
+	fmt.Println("not blocked")
 }
 
 func (s *splitConsume) lost(_ context.Context, cl *kgo.Client, lost map[string][]int32) {
+	for topic, partitions := range lost {
+		ptopics := s.consumers[topic]
+		for _, partition := range partitions {
+			pc := ptopics[partition]
+			delete(ptopics, partition)
+			if len(ptopics) == 0 {
+				delete(s.consumers, topic)
+			}
+			close(pc.quit)
+		}
+	}
 }
-
 
 func (s *splitConsume) poll(cl *kgo.Client) {
 	for {
-		fetches := cl.PollFetches(context.Background())
+		fetches := cl.PollRecords(context.Background(), 10000)
 		if fetches.IsClientClosed() {
 			return
 		}
@@ -132,28 +148,25 @@ func (s *splitConsume) poll(cl *kgo.Client) {
 				}
 			})
 		})
+
+		cl.AllowRebalance()
 	}
 }
 
 func (pc *pconsumer) consume(topic string, partition int32) {
-	var ticker = time.NewTicker(time.Second)
 	for {
 		select {
 		case <-pc.quit:
 		case recs := <-pc.recs:
-			nrecs = len(recs)
-			seen = seen + nrecs
+			// processing
 			pc.cl.MarkCommitRecords(recs...)
-		case <-ticker.C:
+
 			if err := pc.cl.CommitMarkedOffsets(context.Background()); err != nil {
-			fmt.Println(err)
+				fmt.Println(err)
 				return
 			}
-			
-			fmt.Println("committed: ", nrecs)
-			fmt.Println("seen: ", seen)
 
-			nrecs = 0
+			fmt.Printf("%s committed %d events\n", pc.name, len(recs))
 		}
 	}
 }
