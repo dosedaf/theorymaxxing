@@ -123,6 +123,8 @@ func consume(cl *kgo.Client, style int) {
 		case 1:
 			var rs []*kgo.Record
 
+			// kalo mati mid commit, udah di process beberapa, tapi blm dicommit. next commit bakal dups
+			// bisa commit tergantung recordnya misal pake conditional
 			fetches.EachRecord(func(rec *kgo.Record){
 				rs = append(rs, rec)
 			})
@@ -134,6 +136,7 @@ func consume(cl *kgo.Client, style int) {
 		case 2:
 			var seen int
 
+			// kalo udah di akses, bakal jadi uncommitted basically. bedanya sama auto? idk
 			fetches.EachRecord(func(rec *kgo.Record){
 				seen++
 			})
