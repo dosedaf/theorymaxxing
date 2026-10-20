@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"math/rand/v2"
+	"time"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,11 +14,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-var rs []*kgo.Record
-
 var (
-	seen    = 0
-	nrecs   = 0
 	brokers = flag.String("b", "", "brokers")
 	group   = flag.String("g", "", "group")
 	topic   = flag.String("t", "", "topic")
@@ -30,6 +28,8 @@ type splitConsume struct {
 type pconsumer struct {
 	cl   *kgo.Client
 	name string
+
+	done chan struct{}
 	quit chan struct{}
 	recs chan []*kgo.Record
 }
@@ -102,21 +102,31 @@ func (s *splitConsume) assigned(_ context.Context, cl *kgo.Client, assigned map[
 }
 
 func (s *splitConsume) revoked(_ context.Context, cl *kgo.Client, revoked map[string][]int32) {
-	fmt.Println("blocked")
-	s.wg.Wait()
-	fmt.Println("not blocked")
+	s.killConsumers(revoked)
+
+	if err := cl.CommitMarkedOffsets(context.Background()); err != nil {
+		fmt.Println("error comitting marked offsets: ", err)
+		return
+	}
 }
 
 func (s *splitConsume) lost(_ context.Context, cl *kgo.Client, lost map[string][]int32) {
+	s.killConsumers(lost)
+}
+
+func (s *splitConsume) killConsumers(lost map[string][]int32) {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	for topic, partitions := range lost {
-		ptopics := s.consumers[topic]
 		for _, partition := range partitions {
-			pc := ptopics[partition]
-			delete(ptopics, partition)
-			if len(ptopics) == 0 {
-				delete(s.consumers, topic)
-			}
+			pc := s.consumers[topic][partition]
+			delete(s.consumers[topic], partition)
+			delete(s.consumers, topic)
 			close(pc.quit)
+			fmt.Printf("waiting for work to finish t %s p %d\n", topic, partition)
+			wg.Add(1)
+			go func() { <-pc.done; wg.Done() }()
 		}
 	}
 }
@@ -154,17 +164,14 @@ func (s *splitConsume) poll(cl *kgo.Client) {
 }
 
 func (pc *pconsumer) consume(topic string, partition int32) {
+	defer close(pc.done)
+
 	for {
 		select {
 		case <-pc.quit:
 		case recs := <-pc.recs:
-			// processing
+			time.Sleep(time.Duration(rand.IntN(150)+100) * time.Millisecond)
 			pc.cl.MarkCommitRecords(recs...)
-
-			if err := pc.cl.CommitMarkedOffsets(context.Background()); err != nil {
-				fmt.Println(err)
-				return
-			}
 
 			fmt.Printf("%s committed %d events\n", pc.name, len(recs))
 		}
